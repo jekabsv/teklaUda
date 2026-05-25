@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -362,18 +362,24 @@ namespace TeklaUniversalUdaController
 
         public void CommitUDA(string udaKey, string udaVal)
         {
-            if (CurrentSelectedObject == null) return;
+            object target;
+            lock (_selectionLock)
+            {
+                target = CurrentSelectedObject;
+            }
+            if (target == null)
+                return;
 
             try
             {
-                Type objType = CurrentSelectedObject.GetType();
+                Type objType = target.GetType();
                 MethodInfo setPropertyMethod = objType.GetMethod("SetUserProperty", new[] { typeof(string), typeof(string) });
 
-                bool success = (bool)setPropertyMethod.Invoke(CurrentSelectedObject, new object[] { udaKey, udaVal });
+                bool success = (bool)setPropertyMethod.Invoke(target, new object[] { udaKey, udaVal });
 
                 if (success)
                 {
-                    objType.GetMethod("Modify").Invoke(CurrentSelectedObject, null);
+                    objType.GetMethod("Modify").Invoke(target, null);
 
                     Type modelType = ModelInstance.GetType();
                     modelType.GetMethod("CommitChanges", new[] { typeof(string) })
