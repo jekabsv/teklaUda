@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using TeklaUniversalUdaController;
@@ -10,13 +10,17 @@ namespace teklaUDA4._8Win
         private TeklaController _controller = new TeklaController();
         private Timer _uiRefreshTimer;
 
+        // Throttle counter for re-detect / auto-connect attempts.
+        // UI tick runs every 150ms; we only try detect+connect every ~1.5s.
+        private int _autoConnectTickCounter = 0;
+        private const int AutoConnectEveryNTicks = 10;
+
         private Label lblStatus;
         private Label lblSeparator;
 
         private Panel panelDisconnected;
         private Label lblInstructions;
         private Label lblDisconnectedObjectInfo;
-        private Button btnConnect;
 
         private Panel panelConnected;
         private Label lblActiveProjectTitle;
@@ -39,10 +43,28 @@ namespace teklaUDA4._8Win
             Console.WriteLine("Initializing...");
             _controller.Initialize();
 
+            // Try an immediate auto-connect if Tekla is already running.
+            TryAutoConnect();
+
             _uiRefreshTimer = new Timer();
             _uiRefreshTimer.Interval = 150;
             _uiRefreshTimer.Tick += OnUiRefreshTick;
             _uiRefreshTimer.Start();
+        }
+
+        private void TryAutoConnect()
+        {
+            // If we haven't found Tekla yet, re-run detection.
+            if (string.IsNullOrEmpty(_controller.TeklaBinPath))
+            {
+                _controller.DetectTekla();
+            }
+
+            // If Tekla is detected but not yet linked, attempt connect.
+            if (!_controller.IsTeklaLinked && !string.IsNullOrEmpty(_controller.TeklaBinPath))
+            {
+                _controller.ConnectToTekla();
+            }
         }
 
         private void OnUiRefreshTick(object sender, EventArgs e)
@@ -51,6 +73,18 @@ namespace teklaUDA4._8Win
             {
                 this.BeginInvoke(new EventHandler(OnUiRefreshTick), sender, e);
                 return;
+            }
+
+            // Throttled auto-connect: only try every Nth tick to avoid
+            // hammering Process.GetProcessesByName / Assembly.Load on each frame.
+            if (!_controller.IsTeklaLinked)
+            {
+                _autoConnectTickCounter++;
+                if (_autoConnectTickCounter >= AutoConnectEveryNTicks)
+                {
+                    _autoConnectTickCounter = 0;
+                    TryAutoConnect();
+                }
             }
 
             if (string.IsNullOrEmpty(_controller.TeklaBinPath))
@@ -65,7 +99,7 @@ namespace teklaUDA4._8Win
             }
             else
             {
-                lblStatus.Text = $"Tekla Version: {_controller.DetectedVersion} | State: Ready to Connect";
+                lblStatus.Text = $"Tekla Version: {_controller.DetectedVersion} | State: Connecting...";
                 lblStatus.ForeColor = Color.FromArgb(255, 153, 0);
             }
 
@@ -82,10 +116,14 @@ namespace teklaUDA4._8Win
                 panelConnected.Visible = false;
                 panelDisconnected.Visible = true;
 
-                bool processMissing = string.IsNullOrEmpty(_controller.TeklaBinPath);
-                btnConnect.Enabled = !processMissing;
-
-                lblInstructions.Text = "Make sure Tekla Structures is open with a project loaded, then click below to link the application.";
+                if (string.IsNullOrEmpty(_controller.TeklaBinPath))
+                {
+                    lblInstructions.Text = "Waiting for Tekla Structures...\nOpen Tekla and load a project to connect automatically.";
+                }
+                else
+                {
+                    lblInstructions.Text = "Tekla detected. Open a model to finish connecting.";
+                }
 
                 if (_controller.SelectedObjectInfo != "No object selected.")
                 {
@@ -109,11 +147,6 @@ namespace teklaUDA4._8Win
                 bool hasActiveSelection = _controller.CurrentSelectedObject != null;
                 btnSetUda.Enabled = hasActiveSelection;
             }
-        }
-       
-        private void btnConnect_Click(object sender, EventArgs e)
-        {
-            _controller.ConnectToTekla();
         }
 
         private void btnSetUda_Click(object sender, EventArgs e)
@@ -141,7 +174,7 @@ namespace teklaUDA4._8Win
         private void InitializeComponentManual()
         {
             this.Size = new Size(720, 490);
-            this.Text = "Tekla UDA Controller";
+            this.Text = "UdaAssignerTS";
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.BackColor = Color.FromArgb(30, 30, 30);
@@ -159,15 +192,11 @@ namespace teklaUDA4._8Win
 
             panelDisconnected = new Panel { Location = new Point(15, 60), Size = new Size(670, 370), Visible = true };
 
-            lblInstructions = new Label { Location = new Point(10, 10), Size = new Size(650, 50), ForeColor = Color.White };
-            lblDisconnectedObjectInfo = new Label { Location = new Point(10, 65), Size = new Size(650, 50), ForeColor = Color.FromArgb(255, 102, 102), Visible = false };
-
-            btnConnect = new Button { Location = new Point(10, 130), Size = new Size(650, 50), Text = "Connect to Tekla", BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-            btnConnect.Click += btnConnect_Click;
+            lblInstructions = new Label { Location = new Point(10, 10), Size = new Size(650, 80), ForeColor = Color.White };
+            lblDisconnectedObjectInfo = new Label { Location = new Point(10, 95), Size = new Size(650, 80), ForeColor = Color.FromArgb(255, 102, 102), Visible = false };
 
             panelDisconnected.Controls.Add(lblInstructions);
             panelDisconnected.Controls.Add(lblDisconnectedObjectInfo);
-            panelDisconnected.Controls.Add(btnConnect);
             this.Controls.Add(panelDisconnected);
 
 
